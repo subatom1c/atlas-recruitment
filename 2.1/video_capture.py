@@ -12,7 +12,7 @@ Gst.init(None)
 # Create pipeline
 pipeline = Gst.parse_launch("v4l2src ! videoconvert ! autovideosink")
 
-# Start the video
+# Start the video capture and display
 pipeline.set_state(Gst.State.PLAYING)
 
 time.sleep(5)
