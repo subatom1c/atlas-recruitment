@@ -11,7 +11,7 @@ import numpy
 Gst.init(None)
 
 
-def process_sample(sample):
+def process_sample(sample, frame_number):
     print("Processing")
     # Get buffer from sample
     buf = sample.get_buffer()
@@ -88,7 +88,7 @@ def main():
             print("Waiting for sample")
             sample = receiving_sink.emit("pull-sample")
             print("Got sample")
-            buffer = process_sample(sample)
+            buffer = process_sample(sample, frame_number)
 
             ret = sending_src.emit("push-buffer", buffer)
             if ret != Gst.FlowReturn.OK:
@@ -97,7 +97,7 @@ def main():
             frame_number += 1
     except KeyboardInterrupt:
         print("\nStopping...")
-        capturing_pipeline.set_state(Gst.State.NULL)
+        receiving_pipeline.set_state(Gst.State.NULL)
         sending_pipeline.set_state(Gst.State.NULL)            
 
 
