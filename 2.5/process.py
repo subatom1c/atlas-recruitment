@@ -12,6 +12,14 @@ import numpy
 Gst.init(None)
 import threading
 
+# RTSP server URLs
+rtsp_url_1 = "rtsp://127.0.0.1:8554/test"
+rtsp_url_2 = "rtsp://127.0.0.1:8555/test"
+
+# Appsink addresses
+appsink_addr_1 = "host=127.0.0.1 port=5000"
+appsink_addr_2 = "host=127.0.0.1 port=5001"
+
 
 def process_sample(sample, frame_number):
     print("Processing")
@@ -50,80 +58,75 @@ def process_sample(sample, frame_number):
     buf.unmap(mapped_data)
     return gst_buffer
 
-def process_stream(receiving_sink, sending_src):
+def process_stream(appsink, appsource):
     frame_number = 0
-    try: 
-        while True:
-            print("Waiting for sample")
-            sample = receiving_sink.emit("pull-sample")
-            print("Got sample")
-            buffer = process_sample(sample)
+    while True:
+        print("Waiting for sample")
+        sample = appsink.emit("pull-sample")
+        print("Got sample")
+        buffer = process_sample(sample, frame_number)
 
-            ret = sending_src.emit("push-buffer", buffer)
-            if ret != Gst.FlowReturn.OK:
-                print(f"Error pushing buffer: {ret}")
+        ret = appsource.emit("push-buffer", buffer)
+        if ret != Gst.FlowReturn.OK:
+            print(f"Error pushing buffer: {ret}")
 
-            frame_number += 1
-    except KeyboardInterrupt:
-        print("\nStopping...")
-        capturing_pipeline.set_state(Gst.State.NULL)
-        sending_pipeline.set_state(Gst.State.NULL)   
+        frame_number += 1
+
+def initialize_pipelines(urls, sink_addresses):
+    appsources = []
+    appsinks = []
+    source_pipelines = []
+    sink_pipelines = []
+
+    for i in range(2):
+        source_str = (
+        "rtspsrc location=" + urls[i] + " latency=0 ! "
+        "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
+        "video/x-raw,format=I420 ! appsink name=source emit-signals=true max-buffers=1 drop=true"
+        )
+
+        sink_str = (
+        "appsrc name=sink ! videoconvert ! x264enc tune=zerolatency ! "
+        "rtph264pay pt=96 ! udpsink " + sinks_addresses[i]
+        )          
+
+        source_pipeline = Gst.parse_launch(source_str)
+        sink_pipeline = Gst.parse_launch(sink_str)
+        
+        appsource = source_pipeline.get_by_name("source")
+        appsink = sink_pipeline.get_by_name("sink")
+
+        source_pipeline.set_state(Gst.State.PLAYING)
+        sink_pipeline.set_state(Gst.State.PLAYING)
+
+        appsinks.append(appsink)
+        appsources.append(appsource)
+        source_pipelines.append(source_pipeline)
+        sink_pipelines.append(sink_pipeline)
+
+    return source_pipelines, sink_pipelines, appsources, appsinks
+
 
 def main():
 
-    # RTSP server URLs
-    rtsp_url_1 = "rtsp://127.0.0.1:8554/test"
-    rtsp_url_2 = "rtsp://127.0.0.1:8555/test"
-
-    # Appsink addresses
-    appsink_addr_1 = "host=127.0.0.1 port=5000"
-    appsink_addr_2 = "host=127.0.0.1 port=5001"
-
-    # RTSP sources
-    rtsp_source_1 = (
-        "rtspsrc location=" + rtsp_url_1 + " latency=0 ! "
-        "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
-        "video/x-raw,format=I420 ! appsink name=receiving_sink emit-signals=true max-buffers=1 drop=true"
-    )
-    rtsp_source_2 = (
-        "rtspsrc location=" + rtsp_url_2 + " latency=0 ! "
-        "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
-        "video/x-raw,format=I420 ! appsink name=receiving_sink emit-signals=true max-buffers=1 drop=true"
-    )
-
-    # Appsink
-    rtp_output_1 = (
-        "appsrc name=sending_src ! videoconvert ! x264enc tune=zerolatency ! "
-        "rtph264pay pt=96 ! udpsink " + appsink_addr_1
-    )
-    rtp_output_2 = (
-        "appsrc name=sending_src ! videoconvert ! x264enc tune=zerolatency ! "
-        "rtph264pay pt=96 ! udpsink " + appsink_addr_2
-    )
+    urls = [rtsp_url_1, rtsp_url_2]
+    sink_addresses = [appsink_addr_1, appsink_addr_2]
     
-    # Build pipelines 
-    # Change names to just receiver and sender maybe, kinda confusing rn
-    receiving_pipeline_1 = Gst.parse_launch(rtsp_source_1)
-    sending_pipeline_1 = Gst.parse_launch(rtp_output_1)
-    receiving_pipeline_2 = Gst.parse_launch(rtsp_source_2)
-    sending_pipeline_2 = Gst.parse_launch(rtp_output_2)
+    source_pipelines, sink_pipelines, appsources, appsinks = initialize_pipelines(urls, sink_addresses)
 
-    receiving_sink_1 = receiving_pipeline.get_by_name("receiving_sink_1")
-    sending_src_1 = sending_pipeline.get_by_name("sending_src_1")
-    receiving_sink_2 = receiving_pipeline.get_by_name("receiving_sink_2")
-    sending_src_2 = sending_pipeline.get_by_name("sending_src_2")
+    threads = []
+    for i in range(2):
+        thread = threading.Thread(target=process_stream, args=(appsources[i], appsinks[i]))
+        thread.start()
+        threads.append(thread)
 
-    receiving_pipeline_1.set_state(Gst.State.PLAYING)
-    sending_pipeline_1.set_state(Gst.State.PLAYING)
-
-    receiving_pipeline_2.set_state(Gst.State.PLAYING)
-    sending_pipeline_2.set_state(Gst.State.PLAYING)
-
-    frame_number_1 = 0
-    frame_number_2 = 0
-
-
-
+    try:
+        for thread in threads:
+            thread.join()
+    except KeyboardInterrupt:
+        print("Stopping all pipelines...")
+        for p in source_pipelines + sink_pipelines:
+            p.set_state(Gst.State.NULL)
 
 if __name__ == "__main__":
     main()
