@@ -7,7 +7,10 @@
 
 test-launch "( videotestsrc pattern=balls ! videoconvert ! x264enc tune=zerolatency ! rtph264pay name=pay0 pt=96 )"
 
-# Using in windows 
-"C:\Program Files\gstreamer\1.0\mingw_x86_64\bin\gst-launch-1.0.exe" -v ^
-udpsrc port=5000 caps="application/x-rtp, media=video, encoding-name=H264, payload=96" ! ^
-rtph264depay ! avdec_h264 ! queue ! videoconvert ! queue ! autovideosink
+# In windows
+
+# Creating a RTSP server
+mediamtx.exe
+
+# Sending OBS virtual camera to RTSP server
+ffmpeg.exe -f dshow -i video="OBS Virtual Camera" -pix_fmt yuv420p -vcodec libx264 -preset ultrafast -tune zerolatency -framerate 30 -g 30 -f rtsp rtsp://127.0.0.1:8554/mystream
