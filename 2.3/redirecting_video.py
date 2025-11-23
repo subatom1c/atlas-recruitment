@@ -16,7 +16,7 @@ Gst.init(None)
 
 # Created capturing pipeline with appsink for OpenCV (BGR color format for OpenCV)
 capturing_pipeline = Gst.parse_launch(
-    "v4l2src ! video/x-raw,width=640,height=480,framerate=30/1 ! videoconvert ! video/x-raw,format=BGR ! appsink name=sink"
+    "videotestsrc pattern=ball ! video/x-raw,width=640,height=480,framerate=30/1 ! videoconvert ! video/x-raw,format=BGR ! appsink name=sink"
 )
 
 # Fetch sink object from pipeline
@@ -30,8 +30,8 @@ capturing_pipeline.set_state(Gst.State.PLAYING)
 sending_pipeline = Gst.parse_launch(
     "appsrc name=src is-live=true block=true format=time "
     "caps=video/x-raw,format=BGR,width=640,height=480,framerate=30/1 "
-    "! videoconvert ! x264enc tune=zerolatency bitrate=500 ! "
-    "rtph264pay config-interval=1 pt=96 ! udpsink host=127.0.0.1 port=5000"
+    "! videoconvert ! video/x-raw,format=I420 ! x264enc tune=zerolatency bitrate=500 ! "
+    "rtph264pay config-interval=1 pt=96 ! udpsink host=192.168.1.150 port=5000"
 )
 
 appsrc = sending_pipeline.get_by_name("src")
@@ -41,6 +41,7 @@ frame_number = 0
 
 try:
     while True:
+        
         # GstSample
         sample = appsink.emit("pull-sample")
         if sample is None:
@@ -71,8 +72,8 @@ try:
         frame_flipped = cv2.flip(data_frame, 0)
 
         # Build the GstBuffer
-        gst_buffer = Gst.Buffer.new_allocate(None, frame_flipped.nbytes, None)
-        gst_buffer.fill(0, frame_flipped.tobytes())
+        gst_buffer = Gst.Buffer.new_wrapped(frame_flipped.tobytes())
+
 
         gst_buffer.pts = frame_number * (Gst.SECOND // 30)
         gst_buffer.dts = gst_buffer.pts

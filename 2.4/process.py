@@ -1,105 +1,103 @@
-# Computer to process the received video 
-    # Fetch frames from RTSP server
-    # Process frames
-    # Send them to receiver computer 
-
 import cv2
 import gi
+import sys
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst, GObject 
 import numpy
+
 Gst.init(None)
 
-
-def process_sample(sample, frame_number):
-    print("Processing")
+def process_sample(sample):
     # Get buffer from sample
     buf = sample.get_buffer()
+    
+    # Fetch frame caps to ensure we know the size dynamically
+    caps = sample.get_caps()
+    structure = caps.get_structure(0)
+    width = structure.get_value("width")
+    height = structure.get_value("height")             
 
     # Make frame accessible
     accessible, mapped_data = buf.map(Gst.MapFlags.READ)
     if not accessible:
-        return
+        return None
     
-    # Conver to Numpy array
-    data_frame = numpy.frombuffer(mapped_data.data, dtype=numpy.uint8)
-
-    # Fetch frame caps
-    caps = sample.get_caps()
-    structure = caps.get_structure(0)
-    width = structure.get_value("width")
-    height = structure.get_value("height")
-    format = structure.get_value("format")       
-
-    data_frame = data_frame.reshape((height, width, 3))    
+    # Convert to Numpy array
+    data_frame = numpy.ndarray(
+        shape=(height, width, 3),
+        dtype=numpy.uint8,
+        buffer=mapped_data.data
+    )
 
     # Flip the image vertically
-    frame_flipped = cv2.flip(data_frame, 0)
+    frame_processed = cv2.flip(data_frame, 0)
 
-    # Insert frame into buffer
-    gst_buffer = Gst.Buffer.new_allocate(None, frame_flipped.nbytes, None)
-    gst_buffer.fill(0, frame_flipped.tobytes())
-
-    gst_buffer.pts = frame_number * (Gst.SECOND // 30)
-    gst_buffer.dts = gst_buffer.pts
-    gst_buffer.duration = Gst.SECOND // 30
-
-    # Release frame
+    # Create new GStreamer buffer
+    gst_buffer = Gst.Buffer.new_allocate(None, frame_processed.nbytes, None)
+    gst_buffer.fill(0, frame_processed.tobytes())
+    
+    # Release original frame
     buf.unmap(mapped_data)
+    
     return gst_buffer
 
-
 def main():
+    # RTSP Camera IP
+    rtsp_url = "rtsp://192.168.1.150:8554/mystream"
 
-    # RTSP server URL
-    rtsp_url = "rtsp://127.0.0.1:8554/test"
+    # DESTINATION IP
+    target_ip = "192.168.1.150" 
+    target_port = "5000"
 
-    # Appsink address
-    appsink_addr = "host=127.0.0.1 port=5000"
+    # Matches the camera resolution
+    width = 1280
+    height = 720
+    raw_video_caps = f"video/x-raw,format=BGR,width={width},height={height},framerate=30/1"
 
-
-    # RTSP source
+    # Input Pipeline
     rtsp_source = (
-        "rtspsrc location=" + rtsp_url + " latency=0 ! "
+        f"rtspsrc location={rtsp_url} latency=200 protocols=tcp ! "
         "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
-        "video/x-raw,format=I420 ! appsink name=receiving_sink emit-signals=true max-buffers=1 drop=true"
+        f"video/x-raw,format=BGR ! appsink name=receiving_sink emit-signals=true max-buffers=1 drop=true"
     )
 
-    # Appsink
+    # Output Pipeline
     rtp_output = (
-        "appsrc name=sending_src ! videoconvert ! x264enc tune=zerolatency ! "
-        "rtph264pay pt=96 ! udpsink " + appsink_addr
+        f"appsrc name=sending_src caps={raw_video_caps} stream-type=0 format=3 do-timestamp=true ! "
+        "videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 ! "
+        f"rtph264pay config-interval=1 pt=96 ! udpsink host={target_ip} port={target_port} sync=false"
     )
     
-    # Build pipelines
+    print("Starting Pipelines...")
     receiving_pipeline = Gst.parse_launch(rtsp_source)
     sending_pipeline = Gst.parse_launch(rtp_output)
 
     receiving_sink = receiving_pipeline.get_by_name("receiving_sink")
     sending_src = sending_pipeline.get_by_name("sending_src")
 
-    frame_number = 0
-
     receiving_pipeline.set_state(Gst.State.PLAYING)
     sending_pipeline.set_state(Gst.State.PLAYING)
              
     try: 
         while True:
-            print("Waiting for sample")
+            # This blocks until a frame is available
             sample = receiving_sink.emit("pull-sample")
-            print("Got sample")
-            buffer = process_sample(sample, frame_number)
+            
+            if sample:
+                buffer = process_sample(sample)
+                
+                if buffer:
+                    # Push buffer into output pipeline
+                    ret = sending_src.emit("push-buffer", buffer)
+                    if ret != Gst.FlowReturn.OK:
+                        print(f"Error pushing buffer: {ret}")
+            else:
+                print("Timeout or no sample received.")
 
-            ret = sending_src.emit("push-buffer", buffer)
-            if ret != Gst.FlowReturn.OK:
-                print(f"Error pushing buffer: {ret}")
-
-            frame_number += 1
     except KeyboardInterrupt:
         print("\nStopping...")
         receiving_pipeline.set_state(Gst.State.NULL)
         sending_pipeline.set_state(Gst.State.NULL)            
-
 
 if __name__ == "__main__":
     main()
