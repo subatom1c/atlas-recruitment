@@ -17,7 +17,7 @@ CAPS_STR = f"video/x-raw,format=BGR,width={WIDTH},height={HEIGHT},framerate=30/1
 
 # RTSP server URLs
 rtsp_url_1 = "rtsp://192.168.1.150:8554/mystream"
-rtsp_url_2 = "rtsp://192.168.1.150:8554/mystream"
+rtsp_url_2 = "rtsp://192.168.1.150:8555/mystream"
 
 # Appsink addresses
 appsink_addr_1 = "host=192.168.1.150 port=5000"
