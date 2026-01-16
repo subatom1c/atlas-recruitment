@@ -1,6 +1,6 @@
-# atlas-video-pipeline
+# atlas-recruitment
 
-Simple pipeline for video capture and display using
+Computer Vision and video processing using:
 - Gstreamer
 - OpenCV
 
