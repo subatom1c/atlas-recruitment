@@ -16,7 +16,7 @@ Gst.init(None)
 
 # Created capturing pipeline with appsink for OpenCV (BGR color format for OpenCV)
 capturing_pipeline = Gst.parse_launch(
-    "videotestsrc pattern=ball ! video/x-raw,width=640,height=480,framerate=30/1 ! videoconvert ! video/x-raw,format=BGR ! appsink name=sink"
+    "v4l2src ! video/x-raw,width=640,height=480,framerate=30/1 ! videoconvert ! video/x-raw,format=BGR ! appsink name=sink"
 )
 
 # Fetch sink object from pipeline
@@ -31,7 +31,7 @@ sending_pipeline = Gst.parse_launch(
     "appsrc name=src is-live=true block=true format=time "
     "caps=video/x-raw,format=BGR,width=640,height=480,framerate=30/1 "
     "! videoconvert ! video/x-raw,format=I420 ! x264enc tune=zerolatency bitrate=500 ! "
-    "rtph264pay config-interval=1 pt=96 ! udpsink host=192.168.1.150 port=5000"
+    "rtph264pay config-interval=1 pt=96 ! udpsink host=127.0.0.1 port=5000"
 )
 
 appsrc = sending_pipeline.get_by_name("src")
